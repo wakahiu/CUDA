@@ -45,7 +45,7 @@ __global__ void copV_GPU(unsigned int N, unsigned int * A, unsigned int * B, uns
 	}
 	
 	if( a == 1 )	//They are co-prime
-		atomicAdd(numCop,1);
+		atomicAdd(numCop,2);
 }
 
 int main(int argc, char * argv[]){
