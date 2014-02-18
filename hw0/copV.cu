@@ -85,6 +85,32 @@ __global__ void reduce_GPU(unsigned int * A){
     
 }
 
+//Code to display device properties.
+// http://gpucoder.livejournal.com/1064.html
+void printDevProp(cudaDeviceProp devProp)
+{
+    printf("Major revision number:         %d\n",  devProp.major);
+    printf("Minor revision number:         %d\n",  devProp.minor);
+    printf("Name:                          %s\n",  devProp.name);
+    printf("Total global memory:           %lu\n",  devProp.totalGlobalMem);
+    printf("Total shared memory per block: %lu\n",  devProp.sharedMemPerBlock);
+    printf("Total registers per block:     %d\n",  devProp.regsPerBlock);
+    printf("Warp size:                     %d\n",  devProp.warpSize);
+    printf("Maximum memory pitch:          %lu\n",  devProp.memPitch);
+    printf("Maximum threads per block:     %d\n",  devProp.maxThreadsPerBlock);
+    for (int i = 0; i < 3; ++i)
+    printf("Maximum dimension %d of block:  %d\n", i, devProp.maxThreadsDim[i]);
+    for (int i = 0; i < 3; ++i)
+    printf("Maximum dimension %d of grid:   %d\n", i, devProp.maxGridSize[i]);
+    printf("Clock rate:                    %d\n",  devProp.clockRate);
+    printf("Total constant memory:         %lu\n",  devProp.totalConstMem);
+    printf("Texture alignment:             %lu\n",  devProp.textureAlignment);
+    printf("Concurrent copy and execution: %s\n",  (devProp.deviceOverlap ? "Yes" : "No"));
+    printf("Number of multiprocessors:     %d\n",  devProp.multiProcessorCount);
+    printf("Kernel execution timeout:      %s\n",  (devProp.kernelExecTimeoutEnabled ? "Yes" : "No"));
+    return;
+}
+
 int main(int argc, char * argv[]){
 
 	//Create an array on N
@@ -95,9 +121,35 @@ int main(int argc, char * argv[]){
 	unsigned int * h_A;
 	unsigned int * h_B;
 
-	unsigned int nThreads = 128;
+	unsigned int nThreads ;
 	
 	srand(time(NULL));
+	
+	//Query device properties.
+	int dev_count, best_dev;
+	cudaDeviceProp dev_prop_curr;
+	cudaDeviceProp dev_prop_max_;
+	cudaDeviceProp *dev_prop_max = &dev_prop_max_;
+	dev_prop_max->maxThreadsPerBlock = 0;
+	dev_prop_max->multiProcessorCount = 0;
+	dev_prop_max->clockRate = 0;
+	cudaGetDeviceCount( &dev_count );
+	for( int i = 0; i < dev_count ; i++ ){
+		cudaGetDeviceProperties( &dev_prop_curr , i);
+		printf("\n-------------------Device %d----------------------\n",i);
+		printDevProp( dev_prop_curr );
+		//Select the best device
+		if( 	(dev_prop_curr.maxThreadsPerBlock > dev_prop_max->maxThreadsPerBlock) &&
+			(dev_prop_curr.multiProcessorCount > dev_prop_max->multiProcessorCount) && 
+			(dev_prop_curr.clockRate > dev_prop_max->clockRate) ){
+			best_dev = i;
+			dev_prop_max = &dev_prop_curr;
+			nThreads = dev_prop_curr.maxThreadsPerBlock;
+			}
+		
+	}
+	cudaSetDevice(best_dev);
+	printf("\nBest Device found %d\n",best_dev);
 	
 	if(argc < 2){
 		//Fill the arrays with 1000 random numbers
@@ -201,6 +253,8 @@ int main(int argc, char * argv[]){
 	//Parallel Version
 	//
 	//--------------------------------------------------------------------------
+	
+	printf("Best device %d\n",best_dev);
 	//Allocate vectors and count in device memory
 	gettimeofday(&t1,0);
 	unsigned int * d_A;
