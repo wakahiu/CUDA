@@ -6,7 +6,7 @@
 #include <ImfStringAttribute.h>
 #include <ImfMatrixAttribute.h>
 #include <ImfArray.h>
-
+#include <stdlib.h>
 #include <iostream>
 
 using namespace std;

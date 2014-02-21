@@ -1,5 +1,3 @@
-
-
 #include <stdio.h>
 #include <cuda.h>
 
@@ -27,6 +25,25 @@ static void gpuCheckError( cudaError_t err,
 //
 // your __global__ kernel can go here, if you want:
 //
+__global__ void BW_GPU(float * d_imageArray, int w,int h){
+	int i = blockDim.x*blockIdx.x + threadIdx.x; 
+	int j = blockDim.y*blockIdx.y + threadIdx.y;
+	
+	//Bounds check
+	if((i>w) || (j>h))
+		return;
+		
+	unsigned int idx = ((j * w) + i) * 3;
+            
+    float L = 0.2126f*d_imageArray[idx] + 
+              0.7152f*d_imageArray[idx+1] + 
+              0.0722f*d_imageArray[idx+2];
+
+    d_imageArray[idx] = L;
+    d_imageArray[idx+1] = L;
+    d_imageArray[idx+2] = L;
+	
+}
 
 
 int main (int argc, char *argv[])
@@ -46,6 +63,8 @@ int main (int argc, char *argv[])
 
     float *h_imageArray;
     readOpenEXRFile (argv[1], &h_imageArray, w, h);
+    printf("reading openEXR file %s Size WxH = %dx%d\n", argv[1],w,h);
+        
 
     // 
     // serial code: saves the image in "hw1_serial.exr"
@@ -97,20 +116,37 @@ int main (int argc, char *argv[])
     // it with a 2d grid of 2d blocks, with each thread assigned to a 
     // pixel. then 3) copy it back.
     //
+    
+    float * d_imageArray;
+    GPU_CHECKERROR( cudaMalloc((void **)&d_imageArray, sizeof(float)*w*h*3.0) );
+    GPU_CHECKERROR( cudaMemcpy(	d_imageArray, 
+    							h_imageArray, 
+    							sizeof(float)*w*h*3, 
+    							cudaMemcpyHostToDevice ) );
 
-
-
-
-
+	float BLOCK_X = 32.0;
+	float BLOCK_Y = 16.0;
+	dim3 numThreads( BLOCK_X, BLOCK_Y,1);
+	dim3 numBlocks( ceil(w/BLOCK_X), ceil(h/BLOCK_Y),1);
+	
     //
     // Your memory copy, & kernel launch code goes here:
     //
 
-
+	BW_GPU<<< numBlocks, numThreads >>>( d_imageArray,w,h);
+	GPU_CHECKERROR( cudaDeviceSynchronize() );
+	
+	//
+	//Fetch the results
+	//
+    GPU_CHECKERROR( cudaMemcpy(	h_imageArray, 
+								d_imageArray, 
+								sizeof(float)*w*h*3, 
+								cudaMemcpyDeviceToHost ) );
 
 
     // All your work is done. Here we assume that you have copied the 
-    // processed image data back, frmm the device to the host, into the
+    // processed image data back, from the device to the host, into the
     // original host array h_imageArray. You can do it some other way,
     // this is just a suggestion
     
