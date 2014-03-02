@@ -6,9 +6,6 @@
 // STUDENTS: be sure to set the single define at the top of this file, 
 // depending on which machines you are running on.
 #include "im1.h"
-
-
-
 // handy error macro:
 #define GPU_CHECKERROR( err ) (gpuCheckError( err, __FILE__, __LINE__ ))
 static void gpuCheckError( cudaError_t err,
@@ -27,23 +24,35 @@ static void gpuCheckError( cudaError_t err,
 //
 // your __global__ kernel can go here, if you want:
 //
-__global__ void BW_GPU(float * d_imageArray, int w,int h){
-	int i = blockDim.x*blockIdx.x + threadIdx.x; 
-	int j = blockDim.y*blockIdx.y + threadIdx.y;
+__global__ void blurr_GPU(float * d_imageArray, float * Gaussian, int w,int h, int r){
+	int x = blockDim.x*blockIdx.x + threadIdx.x; 
+	int y = blockDim.y*blockIdx.y + threadIdx.y;
+	int d = 2*r + 1;
 	
 	//Bounds check
-	if((i>w) || (j>h))
+	if(((x+r)>w) || ((x-r)<0)|| ((y+r)>h) || ((y-r)<0) )
 		return;
 		
-	unsigned int idx = ((j * w) + i) * 3;
-            
-    float L = 0.2126f*d_imageArray[idx] + 
-              0.7152f*d_imageArray[idx+1] + 
-              0.0722f*d_imageArray[idx+2];
+	float tempR = 0.0f;
+	float tempG = 0.0f;
+	float tempB = 0.0f;
+	
+	for(int i = -r; i <= r; i++){
+		for(int j = -r; j <= r ; j++){
+		
+			unsigned int idx = (((y+i) * w) + (x+j)) * 3;
+			float Gaus_val = Gaussian[(i+r)*d+(j+r)];
+			tempR += d_imageArray[idx]*Gaus_val;
+			tempG += d_imageArray[idx+1]*Gaus_val;
+			tempB += d_imageArray[idx+2]*Gaus_val;
+		}
+	}
+	unsigned int idx = ((y * w) + x) * 3;
+	//tempR = tempG = tempB = 1.0;
+    d_imageArray[idx] = tempR;
+    d_imageArray[idx+1] = tempG;
+    d_imageArray[idx+2] = tempB;
 
-    d_imageArray[idx] = L;
-    d_imageArray[idx+1] = L;
-    d_imageArray[idx+2] = L;
 	
 }
 
@@ -70,7 +79,7 @@ int main (int argc, char *argv[])
  	*Start by calculating the Gaussian Kernel
  	*/
  	int d = 2*r+1;
- 	float G[d][d];
+ 	float h_Gaussian[d][d];
 	float sigma = (float)(2*r);
 	float preFactor = 1/(2*M_PI*sigma*sigma);
 	float normalization = 0.0f;
@@ -81,9 +90,9 @@ int main (int argc, char *argv[])
 	for(int i = -r; i <= r; i++){
  		for(int j = -r; j <= r ; j++){
 			float tempGauss = preFactor*exp( -(i*i+j*j)/(2*sigma) );
-			G[i+r][j+r]= tempGauss;
+			h_Gaussian[i+r][j+r]= tempGauss;
 			normalization += tempGauss;
-			printf("%e\t",G[i+r][j+r]);
+			printf("%e\t",h_Gaussian[i+r][j+r]);
  		}
 		printf("\n");
  	}
@@ -93,8 +102,8 @@ int main (int argc, char *argv[])
 	*/
 	for(int i = -r; i <= r; i++){
  		for(int j = -r; j <= r ; j++){
-			G[i+r][j+r] /= normalization;
-			printf("%e\t",G[i+r][j+r]);
+			h_Gaussian[i+r][j+r] /= normalization;
+			printf("%e\t",h_Gaussian[i+r][j+r]);
  		}
 		printf("\n");
  	}
@@ -118,9 +127,9 @@ int main (int argc, char *argv[])
 				for(int j = -r; j <= r ; j++){
 				
 					unsigned int idx = (((y+i) * w) + (x+j)) * 3;
-					tempR += h_imageArray[idx]*G[i][j];
-					tempG += h_imageArray[idx+1]*G[i][j];
-					tempB += h_imageArray[idx+2]*G[i][j];
+					tempR += h_imageArray[idx]*h_Gaussian[i+r][j+r];
+					tempG += h_imageArray[idx+1]*h_Gaussian[i+r][j+r];
+					tempB += h_imageArray[idx+2]*h_Gaussian[i+r][j+r];
 				}
 			}
             unsigned int idx = (((y) * w) + (x)) * 3;
@@ -136,7 +145,6 @@ int main (int argc, char *argv[])
     free(h_imageArray); // make sure you free it: if you use this variable
                         // again, readOpenEXRFile will allocate more memory
 
-	return 0;
     //
     // Now the GPU version: it will save whatever is in h_imageArray
     // to the file "hw1_gpu.exr"
@@ -159,10 +167,17 @@ int main (int argc, char *argv[])
     //
     
     float * d_imageArray;
+    float * d_Gaussian;
     GPU_CHECKERROR( cudaMalloc((void **)&d_imageArray, sizeof(float)*w*h*3.0) );
+    GPU_CHECKERROR( cudaMalloc((void **)&d_Gaussian, sizeof(float)*d*d) );
     GPU_CHECKERROR( cudaMemcpy(	d_imageArray, 
     							h_imageArray, 
     							sizeof(float)*w*h*3, 
+    							cudaMemcpyHostToDevice ) );
+    
+    GPU_CHECKERROR( cudaMemcpy(	d_Gaussian, 
+    							h_Gaussian, 
+    							sizeof(float)*d*d, 
     							cudaMemcpyHostToDevice ) );
 
 	float BLOCK_X = 32.0;
@@ -174,7 +189,7 @@ int main (int argc, char *argv[])
     // Your memory copy, & kernel launch code goes here:
     //
 
-	BW_GPU<<< numBlocks, numThreads >>>( d_imageArray,w,h);
+	blurr_GPU<<< numBlocks, numThreads >>>( d_imageArray,d_Gaussian,w,h,r);
 	GPU_CHECKERROR( cudaDeviceSynchronize() );
 	
 	//
