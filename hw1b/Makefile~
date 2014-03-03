@@ -1,10 +1,11 @@
 Include = -I/usr/include/OpenEXR
 Link = -lIlmImf -lImath -lHalf
-Flags = -I. -o
+Flags = -g -G -o
 Sources = *.cu *.cc
 Out = prog_out
 Arch = -arch=sm_11
 NVCC = /usr/local/cuda/bin/nvcc
+NVgdb = /usr/local/cuda/bin/cuda-gdb
 
 all: main
 
@@ -15,3 +16,6 @@ main:
 
 clean:
 	rm -f $(Out)
+	
+dbg:
+	$(NVgdb) ./$(OUT) 

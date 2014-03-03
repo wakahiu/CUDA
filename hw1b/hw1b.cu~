@@ -28,6 +28,7 @@ __global__ void blurr_GPU(float * d_imageArray, float * Gaussian, int w,int h, i
 	int x = blockDim.x*blockIdx.x + threadIdx.x; 
 	int y = blockDim.y*blockIdx.y + threadIdx.y;
 	int d = 2*r + 1;
+	float norm = 1/((float)(d*d));
 	
 	//Bounds check
 	if(((x+r)>w) || ((x-r)<0)|| ((y+r)>h) || ((y-r)<0) )
@@ -36,7 +37,7 @@ __global__ void blurr_GPU(float * d_imageArray, float * Gaussian, int w,int h, i
 	float tempR = 0.0f;
 	float tempG = 0.0f;
 	float tempB = 0.0f;
-	
+ 	
 	for(int i = -r; i <= r; i++){
 		for(int j = -r; j <= r ; j++){
 		
@@ -48,7 +49,6 @@ __global__ void blurr_GPU(float * d_imageArray, float * Gaussian, int w,int h, i
 		}
 	}
 	unsigned int idx = ((y * w) + x) * 3;
-	//tempR = tempG = tempB = 1.0;
     d_imageArray[idx] = tempR;
     d_imageArray[idx+1] = tempG;
     d_imageArray[idx+2] = tempB;
@@ -62,7 +62,8 @@ int main (int argc, char *argv[])
  
        
     int w, h;   // the width & height of the image, used frequently
-    int r = argv[2][0]-'0';		//Pray that the input radius is a single digit
+    //int r = argv[2][0]-'0';		//Pray that the input radius is a single digit
+    int r = 5;
 
 
     // First, convert the openEXR file into a form we can use on the CPU
@@ -72,8 +73,10 @@ int main (int argc, char *argv[])
 
 
     float *h_imageArray;
+    float *h_imageArrayResult;
     readOpenEXRFile (argv[1], &h_imageArray, w, h);
     printf("reading openEXR file %s Size WxH = %dx%d Blur radius%d\n", argv[1],w,h,r);
+    h_imageArrayResult = (float *)malloc(w*h*3*sizeof(float));
         
    	/*
  	*Start by calculating the Gaussian Kernel
@@ -84,8 +87,11 @@ int main (int argc, char *argv[])
 	float preFactor = 1/(2*M_PI*sigma*sigma);
 	float normalization = 0.0f;
 	
+	/* 
+	* Generate a Gaussian matrix
+	*/
 	/*
-	* non-normalized kernel
+	* non-normalized Gausian
 	*/
 	for(int i = -r; i <= r; i++){
  		for(int j = -r; j <= r ; j++){
@@ -98,7 +104,7 @@ int main (int argc, char *argv[])
  	}
 	printf("\n");
 	/*
-	* normalized kernel
+	* normalized Gaussian
 	*/
 	for(int i = -r; i <= r; i++){
  		for(int j = -r; j <= r ; j++){
@@ -127,24 +133,27 @@ int main (int argc, char *argv[])
 				for(int j = -r; j <= r ; j++){
 				
 					unsigned int idx = (((y+i) * w) + (x+j)) * 3;
-					tempR += h_imageArray[idx]*h_Gaussian[i+r][j+r];
-					tempG += h_imageArray[idx+1]*h_Gaussian[i+r][j+r];
-					tempB += h_imageArray[idx+2]*h_Gaussian[i+r][j+r];
+					float Gaus_val = h_Gaussian[i+r][j+r];
+					tempR += h_imageArray[idx]*Gaus_val;
+					tempG += h_imageArray[idx+1]*Gaus_val;
+					tempB += h_imageArray[idx+2]*Gaus_val;
+					
 				}
 			}
             unsigned int idx = (((y) * w) + (x)) * 3;
-            h_imageArray[idx] = tempR;
-            h_imageArray[idx+1] = tempG;
-            h_imageArray[idx+2] = tempB;
+            h_imageArrayResult[idx] = tempR;
+            h_imageArrayResult[idx+1] = tempG;
+            h_imageArrayResult[idx+2] = tempB;
 
        }
     }
     
     printf("writing output image hw1_serial.exr\n");
-    writeOpenEXRFile ("hw1_serial.exr", h_imageArray, w, h);
+    writeOpenEXRFile ("hw1_serial.exr", h_imageArrayResult, w, h);
     free(h_imageArray); // make sure you free it: if you use this variable
                         // again, readOpenEXRFile will allocate more memory
-
+  	free( h_imageArrayResult );
+	
     //
     // Now the GPU version: it will save whatever is in h_imageArray
     // to the file "hw1_gpu.exr"
@@ -176,7 +185,7 @@ int main (int argc, char *argv[])
     							cudaMemcpyHostToDevice ) );
     
     GPU_CHECKERROR( cudaMemcpy(	d_Gaussian, 
-    							h_Gaussian, 
+    							&h_Gaussian[0][0], 
     							sizeof(float)*d*d, 
     							cudaMemcpyHostToDevice ) );
 
