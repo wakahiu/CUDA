@@ -8,7 +8,7 @@
 #include "im1.h"
 // handy error macro:
 #define GPU_CHECKERROR( err ) (gpuCheckError( err, __FILE__, __LINE__ ))
-static void gpuCheckError( cudaError_t err,
+inline static void gpuCheckError( cudaError_t err,
                           const char *file,
                           int line ) {
     if (err != cudaSuccess) {
@@ -19,36 +19,44 @@ static void gpuCheckError( cudaError_t err,
 }
 
 
-
-
 //
 // your __global__ kernel can go here, if you want:
 //
 __global__ void blurr_GPU(float * d_imageArray, float * Gaussian, int w,int h, int r){
+	
+	
+	int d = 2*r + 1;
 	int x = blockDim.x*blockIdx.x + threadIdx.x; 
 	int y = blockDim.y*blockIdx.y + threadIdx.y;
-	int d = 2*r + 1;
 	float norm = 1/((float)(d*d));
 	
 	//Bounds check
 	if(((x+r)>w) || ((x-r)<0)|| ((y+r)>h) || ((y-r)<0) )
 		return;
-		
-	float tempR = 0.0f;
-	float tempG = 0.0f;
-	float tempB = 0.0f;
- 	
+
+	unsigned int idx;
+	idx = ((y * w) + x) * 3;
+	float tempR = 0.0 ;
+	float tempG = 0.0;
+	float tempB = 0.0;
+	float Gaus_val;
+	
 	for(int i = -r; i <= r; i++){
 		for(int j = -r; j <= r ; j++){
-		
-			unsigned int idx = (((y+i) * w) + (x+j)) * 3;
-			float Gaus_val = Gaussian[(i+r)*d+(j+r)];
-			tempR += d_imageArray[idx]*Gaus_val;
-			tempG += d_imageArray[idx+1]*Gaus_val;
-			tempB += d_imageArray[idx+2]*Gaus_val;
+			
+			//Gaussian[(i+r)*d+(j+r)] = 0.0;
+			idx = ((y * w) + x) * 3;
+			idx += 3*j;
+			idx += 3*i*w;
+			Gaus_val = Gaussian[(i+r)*d+(j+r)];
+			//Gaus_val = norm;
+			tempR += (d_imageArray[idx]*Gaus_val) ;
+			tempG += (d_imageArray[idx+1]*Gaus_val) ;
+			tempB += (d_imageArray[idx+2]*Gaus_val) ;
 		}
 	}
-	unsigned int idx = ((y * w) + x) * 3;
+	
+	idx = ((y * w) + x) * 3;
     d_imageArray[idx] = tempR;
     d_imageArray[idx+1] = tempG;
     d_imageArray[idx+2] = tempB;
@@ -62,8 +70,8 @@ int main (int argc, char *argv[])
  
        
     int w, h;   // the width & height of the image, used frequently
-    //int r = argv[2][0]-'0';		//Pray that the input radius is a single digit
-    int r = 5;
+    int r = argv[2][0]-'0';		//Pray that the input radius is a single digit
+    //int r = 5;
 
 
     // First, convert the openEXR file into a form we can use on the CPU
@@ -75,7 +83,7 @@ int main (int argc, char *argv[])
     float *h_imageArray;
     float *h_imageArrayResult;
     readOpenEXRFile (argv[1], &h_imageArray, w, h);
-    printf("reading openEXR file %s Size WxH = %dx%d Blur radius%d\n", argv[1],w,h,r);
+    printf("reading openEXR file %s Size WxH = %dx%d Blur radius%d\n", "stillife.exr",w,h,r);
     h_imageArrayResult = (float *)malloc(w*h*3*sizeof(float));
         
    	/*
@@ -177,8 +185,10 @@ int main (int argc, char *argv[])
     
     float * d_imageArray;
     float * d_Gaussian;
+    float * d_Gaussian2;
     GPU_CHECKERROR( cudaMalloc((void **)&d_imageArray, sizeof(float)*w*h*3.0) );
     GPU_CHECKERROR( cudaMalloc((void **)&d_Gaussian, sizeof(float)*d*d) );
+    GPU_CHECKERROR( cudaMalloc((void **)&d_Gaussian2, sizeof(float)*d*d) );
     GPU_CHECKERROR( cudaMemcpy(	d_imageArray, 
     							h_imageArray, 
     							sizeof(float)*w*h*3, 
@@ -188,8 +198,12 @@ int main (int argc, char *argv[])
     							&h_Gaussian[0][0], 
     							sizeof(float)*d*d, 
     							cudaMemcpyHostToDevice ) );
+    							
+   	GPU_CHECKERROR( cudaMemset(	d_Gaussian2, 
+    							0, 
+    							sizeof(float)*d*d) );
 
-	float BLOCK_X = 32.0;
+	float BLOCK_X = 16.0;
 	float BLOCK_Y = 16.0;
 	dim3 numThreads( BLOCK_X, BLOCK_Y,1);
 	dim3 numBlocks( ceil(w/BLOCK_X), ceil(h/BLOCK_Y),1);
@@ -197,9 +211,19 @@ int main (int argc, char *argv[])
     //
     // Your memory copy, & kernel launch code goes here:
     //
-
+    
+    GPU_CHECKERROR( cudaGetLastError() );						
 	blurr_GPU<<< numBlocks, numThreads >>>( d_imageArray,d_Gaussian,w,h,r);
+	GPU_CHECKERROR( cudaGetLastError() );
+	//dim3 numThreadsX( BLOCK_X, BLOCK_Y,1);
+	//blurr_GPU<<< 1, numThreadsX >>>( d_imageArray,d_Gaussian,w,h,r);
 	GPU_CHECKERROR( cudaDeviceSynchronize() );
+	GPU_CHECKERROR( cudaGetLastError() );
+					
+	/*
+	*
+	*/
+	
 	
 	//
 	//Fetch the results
@@ -208,8 +232,18 @@ int main (int argc, char *argv[])
 								d_imageArray, 
 								sizeof(float)*w*h*3, 
 								cudaMemcpyDeviceToHost ) );
-
-
+ 	
+ 	GPU_CHECKERROR( cudaMemcpy(	&h_Gaussian[0][0], 
+ 								d_Gaussian,
+    							sizeof(float)*d*d, 
+    							cudaMemcpyDeviceToHost ) );
+    for(int i = -r; i <= r; i++){
+ 		for(int j = -r; j <= r ; j++){
+			printf("%e\t",h_Gaussian[i+r][j+r]);
+ 		}
+		printf("\n");
+ 	}
+ 							
     // All your work is done. Here we assume that you have copied the 
     // processed image data back, from the device to the host, into the
     // original host array h_imageArray. You can do it some other way,
@@ -218,7 +252,11 @@ int main (int argc, char *argv[])
     printf("writing output image hw1_gpu.exr\n");
     writeOpenEXRFile ("hw1_gpu.exr", h_imageArray, w, h);
     free (h_imageArray);
-
+    
+	GPU_CHECKERROR( cudaFree(d_imageArray) );
+	GPU_CHECKERROR( cudaFree(d_Gaussian) );
+	GPU_CHECKERROR( cudaFree(d_Gaussian2) );
+	
     printf("done.\n");
 
     return 0;
