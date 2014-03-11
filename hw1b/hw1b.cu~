@@ -79,8 +79,42 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 	}
 	//These blocks may access picture elements that are out of bounds
 	else{
-		idx = ((y * w) + x) ;		
-    	d_imageArrayResult[idx] = 1.0;
+		//Collaborative loading into shared memory
+		for( i = y-r, iSh = threadIdx.y ; i< (blockDim.y*(blockIdx.y + 1) + r)  ; i+=blockDim.y , iSh+=blockDim.y ){
+			for( j = x-r, jSh = threadIdx.x ; j < (blockDim.x*(blockIdx.x + 1) + r)  ; j+=blockDim.x , jSh+=blockDim.x){
+				int iImg = i;
+				int jImg = j;
+				if(i<0){
+					iImg = 0;
+				}
+				if( j < 0){
+					jImg = 0;
+				}
+				if(i>=h){
+					iImg = h-1;
+				}
+				if(j>=w){
+					jImg = w-1;
+				}	
+				picBlock[iSh*shDim_x+jSh] = d_imageArray[iImg*w+jImg];
+				
+			}
+		}
+		
+		__syncthreads();		//Make sure every thread has loaded all its portions.
+		
+		for( i = -r; i <= r; i++){
+				for( j = -r; j <= r ; j++){
+					idx = (threadIdx.y+r+i)*shDim_x + (threadIdx.x+r+j);
+					//Gaus_val = Gaussian[(i+r)*d+(j+r)];
+					Gaus_val = test[(i+r)*d+(j+r)];
+					tempColor += picBlock[idx]*Gaus_val ;
+			}
+		}
+		
+		idx = ((y * w) + x) ;
+		d_imageArrayResult[idx] = tempColor;
+		
 	}
 	
 	//if(((x+r)<w) && ((x-r)>=0)  && ((y+r)<h) && ((y-r)>=0) ){
@@ -144,7 +178,7 @@ int main (int argc, char *argv[])
  	*/
  	int d = 2*r+1;
  	float h_Gaussian[d][d];
-	float sigma = (float)(2*r);
+	float sigma = ((float)r/3.0);
 	float preFactor = 1/(2*M_PI*sigma*sigma);
 	float normalization = 0.0f;
 	

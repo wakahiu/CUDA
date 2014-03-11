@@ -34,7 +34,6 @@ inline static void gpuCheckError( cudaError_t err,
 //
 __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float * Gaussian, int w,int h, int r,float * test){
 	
-	
 	int d = 2*r + 1;
 	extern __shared__ float picBlock[];
 	int x = blockDim.x*blockIdx.x + threadIdx.x; 
@@ -61,7 +60,7 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 			for( j = x-r, jSh = threadIdx.x ; j < (blockDim.x*(blockIdx.x + 1) + r)  ; j+=blockDim.x , jSh+=blockDim.x){
 				picBlock[iSh*shDim_x+jSh] = d_imageArray[i*w+j];
 			}
-		}
+		}/*
 		__syncthreads();		//Make sure every thread has loaded all its portions.
 		
 		for( i = -r; i <= r; i++){
@@ -75,15 +74,61 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 		
 		idx = ((y * w) + x) ;
 		d_imageArrayResult[idx] = tempColor;
-    	
+  */  	
 	}
 	//These blocks may access picture elements that are out of bounds
 	else{
-		idx = ((y * w) + x) ;		
-    	d_imageArrayResult[idx] = 1.0;
+		//Collaborative loading into shared memory
+		for( i = y-r, iSh = threadIdx.y ; i< (blockDim.y*(blockIdx.y + 1) + r)  ; i+=blockDim.y , iSh+=blockDim.y ){
+			for( j = x-r, jSh = threadIdx.x ; j < (blockDim.x*(blockIdx.x + 1) + r)  ; j+=blockDim.x , jSh+=blockDim.x){
+				int iImg = i;
+				int jImg = j;
+				if(i<0){
+					iImg = 0;
+				}
+				if( j < 0){
+					jImg = 0;
+				}
+				if(i>=h){
+					iImg = h-1;
+				}
+				if(j>=w){
+					jImg = w-1;
+				}	
+				picBlock[iSh*shDim_x+jSh] = d_imageArray[iImg*w+jImg];
+				
+			}
+		}
+/*		
+		__syncthreads();		//Make sure every thread has loaded all its portions.
+		
+		for( i = -r; i <= r; i++){
+				for( j = -r; j <= r ; j++){
+					idx = (threadIdx.y+r+i)*shDim_x + (threadIdx.x+r+j);
+					//Gaus_val = Gaussian[(i+r)*d+(j+r)];
+					Gaus_val = test[(i+r)*d+(j+r)];
+					tempColor += picBlock[idx]*Gaus_val ;
+			}
+		}
+		
+		idx = ((y * w) + x) ;
+		d_imageArrayResult[idx] = tempColor;
+*/		
 	}
-	
-	//if(((x+r)<w) && ((x-r)>=0)  && ((y+r)<h) && ((y-r)>=0) ){
+		__syncthreads();		//Make sure every thread has loaded all its portions.
+		
+		for( i = -r; i <= r; i++){
+				for( j = -r; j <= r ; j++){
+					idx = (threadIdx.y+r+i)*shDim_x + (threadIdx.x+r+j);
+					//Gaus_val = Gaussian[(i+r)*d+(j+r)];
+					Gaus_val = test[(i+r)*d+(j+r)];
+					tempColor += picBlock[idx]*Gaus_val ;
+			}
+		}
+		
+		idx = ((y * w) + x) ;
+		d_imageArrayResult[idx] = tempColor;
+
 }
 
 void blurr_CPU( float *h_imageArray, float *h_imageArrayResult, int w, int h, int r, float * h_Gaussian  ){
@@ -144,7 +189,7 @@ int main (int argc, char *argv[])
  	*/
  	int d = 2*r+1;
  	float h_Gaussian[d][d];
-	float sigma = (float)(2*r);
+	float sigma = ((float)r/3.0);
 	float preFactor = 1/(2*M_PI*sigma*sigma);
 	float normalization = 0.0f;
 	
@@ -216,7 +261,7 @@ int main (int argc, char *argv[])
     float * d_imageArray;
     float * d_imageArrayResult;
     float h_RGB_planes[3][h][w];
-    size_t sharedBlockSZ = (BLOCK_X+2*r) * (BLOCK_Y+2*r) * sizeof(float);
+    size_t sharedBlockSZ = 3*(BLOCK_X+2*r) * (BLOCK_Y+2*r) * sizeof(float);
 	if(sharedBlockSZ > MAX_SHARED_MEM){
 		printf("Shared Memory exceeded allocated size per block");
 		return -1;
