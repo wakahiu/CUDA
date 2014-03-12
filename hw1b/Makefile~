@@ -12,7 +12,7 @@ all: main
 # Compiling
 main:
 	$(NVCC) $(Sources) $(Flags) $(Out) $(Include) $(Link)  $(Arch)
-	./$(Out) "stillife.exr" 9
+	./$(Out) "stillife.exr" 10
 
 clean:
 	rm -f $(Out)
