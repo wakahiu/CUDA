@@ -56,7 +56,7 @@ void printDevProp(cudaDeviceProp devProp)
 //
 // your __global__ kernel can go here, if you want:
 //
-__global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float * Gaussian, int w,int h, int r){
+__global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, int w,int h, int r){
 	
 	int d = 2*r + 1;
 	extern __shared__ float picBlock[];
@@ -68,18 +68,15 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 	if( x>=w || y>=h )
 		return;
 	
-	unsigned int idx;
 	unsigned int idxN, idxS, idxW, idxE;
 	float tempR = 0.0;
     float tempG = 0.0;
     float tempB = 0.0;
+    
 	float Gaus_val = 0.0;
 	int	shDim_x = (blockDim.x + 2*r);
-	int	shDim_y = (blockDim.y + 2*r);
-	int GausIdx = shDim_x * shDim_y * 3;
 	int i, j;
 	int iSh, jSh;
-	float norm = 1.0/(float)(d*d);
 	
 	//Copy the gaussian kernel into shared memory
 	//Blocks that do not require boundry check
@@ -105,12 +102,12 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 		for( i = y-r, iSh = threadIdx.y ; i< (blockDim.y*(blockIdx.y + 1) + r)  ; i+=blockDim.y , iSh+=blockDim.y ){
 			for( j = x-r, jSh = threadIdx.x ; j < (blockDim.x*(blockIdx.x + 1) + r)  ; j+=blockDim.x , jSh+=blockDim.x){
 				
-				int iImg = i<0? 0 : (i>=h ? h-1 : i );
-				int jImg = j<0? 0 : (j>=w ? w-1 : j );
+				idxN = i<0? 0 : (i>=h ? h-1 : i );
+				idxS = j<0? 0 : (j>=w ? w-1 : j );
 	
-				picBlock[(iSh*shDim_x+jSh)*3] = d_imageArray[(iImg*w+jImg)*3];
-				picBlock[(iSh*shDim_x+jSh)*3+1] = d_imageArray[(iImg*w+jImg)*3+1];
-				picBlock[(iSh*shDim_x+jSh)*3+2] = d_imageArray[(iImg*w+jImg)*3+2];
+				picBlock[(iSh*shDim_x+jSh)*3] = d_imageArray[(idxN*w+idxS)*3];
+				picBlock[(iSh*shDim_x+jSh)*3+1] = d_imageArray[(idxN*w+idxS)*3+1];
+				picBlock[(iSh*shDim_x+jSh)*3+2] = d_imageArray[(idxN*w+idxS)*3+2];
 				
 			}
 		}
@@ -127,42 +124,43 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 		//Kernel is symetrix along x and y axis.
 		idxN = idxS = 3*((threadIdx.y+r+i)*shDim_x + (threadIdx.x+r));
 		idxW = idxE = 3*((threadIdx.y+r-i)*shDim_x + (threadIdx.x+r));
+		iSh = (i+r)*d+r;
 		
 		//Loop Unrolling 2 times.
 		for( j = 0; j <= r-1 ; j+=2){
 				
-			Gaus_val = Gaussian[(i+r)*d+(j+r)];
+			Gaus_val = d_const_Gaussian[ iSh ];
 			tempR += (picBlock[idxN]+picBlock[idxS] + picBlock[idxE]+picBlock[idxW])*Gaus_val;
 			tempG += (picBlock[idxN+1]+picBlock[idxS+1]+picBlock[idxE+1]+picBlock[idxW+1])*Gaus_val;
 			tempB += (picBlock[idxN+2]+picBlock[idxS+2]+picBlock[idxE+2]+picBlock[idxW+2])*Gaus_val;
 			
-			idxS+=3;	idxN-=3;	idxE+=3;	idxW-=3;
+			idxS+=3;	idxN-=3;	idxE+=3;	idxW-=3; iSh++;
 			
 			tempR += (picBlock[idxN]+picBlock[idxS] + picBlock[idxE]+picBlock[idxW])*Gaus_val;
 			tempG += (picBlock[idxN+1]+picBlock[idxS+1]+picBlock[idxE+1]+picBlock[idxW+1])*Gaus_val;
 			tempB += (picBlock[idxN+2]+picBlock[idxS+2]+picBlock[idxE+2]+picBlock[idxW+2])*Gaus_val;
 			
-			idxS+=3;	idxN-=3;	idxE+=3;	idxW-=3;
+			idxS+=3;	idxN-=3;	idxE+=3;	idxW-=3; iSh++;
 
 		}
 		//Complete the unrolled portion
 		for(  ; j <= r ; j++){
 				
-			Gaus_val = Gaussian[(i+r)*d+(j+r)];
+			Gaus_val = d_const_Gaussian[ iSh ];
 
 			tempR += (picBlock[idxN]+picBlock[idxS] + picBlock[idxE]+picBlock[idxW])*Gaus_val;
 			tempG += (picBlock[idxN+1]+picBlock[idxS+1]+picBlock[idxE+1]+picBlock[idxW+1])*Gaus_val;
 			tempB += (picBlock[idxN+2]+picBlock[idxS+2]+picBlock[idxE+2]+picBlock[idxW+2])*Gaus_val;
 			
-			idxS+=3;	idxN-=3;	idxE+=3;	idxW-=3;
+			idxS+=3;	idxN-=3;	idxE+=3;	idxW-=3;  iSh++;
 
 		}
 	}
-	
-	idx = ((y * w) + x)*3;
-	d_imageArrayResult[idx] = tempR;
-	d_imageArrayResult[idx+1] = tempG;
-	d_imageArrayResult[idx+2] = tempB;
+	//store the blurrred image.
+	idxN = ((y * w) + x)*3;
+	d_imageArrayResult[idxN] = tempR;
+	d_imageArrayResult[idxN+1] = tempG;
+	d_imageArrayResult[idxN+2] = tempB;
 	
 }
 
@@ -298,15 +296,16 @@ int main (int argc, char *argv[])
     float * d_test;
     float BLOCK_X = 16.0;
 	float BLOCK_Y = 16.0;
+	size_t sharedBlockSZ = 3*(BLOCK_X+2*r) * (BLOCK_Y+2*r) * sizeof(float);	//Picture blocks
+	if(sharedBlockSZ > dev_prop_curr.sharedMemPerBlock){
+		printf("Shared Memory exceeded allocated size per block: %lu Max %lu\n",sharedBlockSZ, dev_prop_curr.sharedMemPerBlock);
+		return -1;
+	}
 	dim3 numThreads( BLOCK_X, BLOCK_Y,1);
 	dim3 numBlocks( ceil(w/BLOCK_X), ceil(h/BLOCK_Y),1);
     float * d_imageArray;
     float * d_imageArrayResult;
-    size_t sharedBlockSZ = 3*(BLOCK_X+2*r) * (BLOCK_Y+2*r) * sizeof(float);	//Picture blocks
-	if(sharedBlockSZ > MAX_SHARED_MEM){
-		printf("Shared Memory exceeded allocated size per block");
-		return -1;
-	}
+
     
     GPU_CHECKERROR( cudaMalloc((void **)&d_imageArray, sizeof(float)*w*h*3) );
     GPU_CHECKERROR( cudaMalloc((void **)&d_imageArrayResult, sizeof(float)*w*h*3) );
@@ -319,10 +318,6 @@ int main (int argc, char *argv[])
     							0,
     							cudaMemcpyHostToDevice));
 	
-	GPU_CHECKERROR( cudaMemcpy(	d_test, 
-    							&h_Gaussian[0][0], 
-    							sizeof(float)*d*d,
-    							cudaMemcpyHostToDevice));
 
 	GPU_CHECKERROR( cudaMemcpy(	d_imageArray, 
 								h_imageArray, 
@@ -332,8 +327,7 @@ int main (int argc, char *argv[])
 	// Your memory copy, & kernel launch code goes here:
 	//
 	printf("Launching one kernel\n");
-	//blurr_GPU<<< numBlocks, numThreads , sharedBlockSZ>>>( d_imageArray,d_imageArrayResult,d_const_Gaussian,w,h,r);
-	blurr_GPU<<< numBlocks, numThreads , sharedBlockSZ>>>( d_imageArray,d_imageArrayResult,d_test,w,h,r);
+	blurr_GPU<<< numBlocks, numThreads , sharedBlockSZ>>>( d_imageArray,d_imageArrayResult,w,h,r);
 	GPU_CHECKERROR( cudaGetLastError() );
 	
     //}
