@@ -332,8 +332,8 @@ int main (int argc, char *argv[])
 	// Your memory copy, & kernel launch code goes here:
 	//
 	printf("Launching one kernel\n");
-	blurr_GPU<<< numBlocks, numThreads , sharedBlockSZ>>>( d_imageArray,d_imageArrayResult,d_const_Gaussian,w,h,r);
-	//blurr_GPU<<< numBlocks, numThreads , sharedBlockSZ>>>( d_imageArray,d_imageArrayResult,d_test,w,h,r);
+	//blurr_GPU<<< numBlocks, numThreads , sharedBlockSZ>>>( d_imageArray,d_imageArrayResult,d_const_Gaussian,w,h,r);
+	blurr_GPU<<< numBlocks, numThreads , sharedBlockSZ>>>( d_imageArray,d_imageArrayResult,d_test,w,h,r);
 	GPU_CHECKERROR( cudaGetLastError() );
 	
     //}
