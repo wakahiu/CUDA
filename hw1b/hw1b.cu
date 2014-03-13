@@ -78,10 +78,7 @@ __global__ void blurr_GPU_naive(float * d_imageArray,float * d_imageArrayResult,
 	int i, j;
 	int iSh, jSh;
 
-	
-	/*
-	* All the subblocks are now in shared memory. Now we blurr the image.
-	*/
+	r=0;
 	
 	for( i = -r; i <= r; i++){
 		
@@ -89,7 +86,8 @@ __global__ void blurr_GPU_naive(float * d_imageArray,float * d_imageArrayResult,
 		for(  j = -r; j <= r ; j++){
 			
 			idx = (((y+i) * w) + (i+x))*3;
-			Gaus_val = d_dev_Gaussian[ (i+r)*d+(j+r) ];
+			Gaus_val = d_dev_Gaussian[ (i+r)*d+r+j ];
+			Gaus_val = 1.0;
 			tempR += d_imageArray[idx]*Gaus_val; 
 			tempG += d_imageArray[idx+1]*Gaus_val; 
 			tempB += d_imageArray[idx+2]*Gaus_val; 
@@ -116,10 +114,6 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 	int x = blockDim.x*blockIdx.x + threadIdx.x; 
 	int y = blockDim.y*blockIdx.y + threadIdx.y;
 	
-	//Bounds check
-	if( x>=w || y>=h )
-		return;
-	
 	unsigned int idxN, idxS, idxW, idxE;
 	float tempR = 0.0;
     float tempG = 0.0;
@@ -134,10 +128,8 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 	
 	//Copy the gaussian kernel into shared memory
 	//Blocks that do not require boundry check
-	if( (((blockIdx.x+1)*blockDim.x)<(w-r)) && 
-		((blockIdx.x > blockDim.x*(r/blockDim.x)))  && 
-		(((blockIdx.y+1)*blockDim.y)<(h-r)) && 
-		((blockIdx.y > blockDim.y*(r/blockDim.y)))){	
+	if( (blockIdx.x*blockDim.x >=  r )		&& (blockIdx.y*blockDim.y >=  r) &&
+		(((blockIdx.x+1)*blockDim.x +r) < w)	&& (((blockIdx.y+1)*blockDim.y +r) < h)){	
 		
 		//Collaborative loading into shared memory
 		for( i = y-r, iSh = threadIdx.y ; i< (blockDim.y*(blockIdx.y + 1) + r)  ; i+=blockDim.y , iSh+=blockDim.y ){
@@ -167,7 +159,6 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 		}
 
 		__syncthreads();		//Make sure every thread has loaded all its portions.
-
 	}
 	
 	/*
@@ -281,7 +272,7 @@ int main (int argc, char *argv[])
 	*/
 	for(int i = -r; i <= r; i++){
  		for(int j = -r; j <= r ; j++){
-			float tempGauss = exp( -(i*i+j*j)/(2*sigma*sigma) );
+			float tempGauss = preFactor* exp( -(i*i+j*j)/(2*sigma*sigma) );
 			h_Gaussian[i+r][j+r]= tempGauss;
 			normalization += tempGauss;
  		}
@@ -358,7 +349,7 @@ int main (int argc, char *argv[])
 	// Your memory copy, & kernel launch code goes here:
 	//
 	printf("Launching one kernel\n");
-	blurr_GPU_naive<<< numBlocks, numThreads , sharedBlockSZ>>>( d_imageArray,d_imageArrayResult,d_test,w,h,r);
+	blurr_GPU<<< numBlocks, numThreads , sharedBlockSZ>>>( d_imageArray,d_imageArrayResult,d_test,w,h,r);
 	GPU_CHECKERROR( cudaGetLastError() );
 	
     //}
