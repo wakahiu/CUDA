@@ -55,54 +55,6 @@ void printDevProp(cudaDeviceProp devProp)
     return;
 }
 
-__global__ void blurr_GPU_naive(float * d_imageArray,float * d_imageArrayResult, float *  d_dev_Gaussian, int w,int h, int r){
-	
-	int d = 2*r + 1;
-	extern __shared__ float picBlock[];
-	
-	int x = blockDim.x*blockIdx.x + threadIdx.x; 
-	int y = blockDim.y*blockIdx.y + threadIdx.y;
-	
-	//Bounds check
-	if( x>=w || y>=h )
-		return;
-	
-	unsigned int idx;
-	float tempR = 0.0;
-    float tempG = 0.0;
-    float tempB = 0.0;		
-	float Gaus_val = 0.0;
-	int	shDim_x = (blockDim.x + 2*r);
-	int	shDim_y = (blockDim.y + 2*r);
-	int offset = shDim_x * shDim_y;
-	int i, j;
-	int iSh, jSh;
-
-	r=0;
-	
-	for( i = -r; i <= r; i++){
-		
-		//Complete the unrolled portion
-		for(  j = -r; j <= r ; j++){
-			
-			idx = (((y+i) * w) + (i+x))*3;
-			Gaus_val = d_dev_Gaussian[ (i+r)*d+r+j ];
-			Gaus_val = 1.0;
-			tempR += d_imageArray[idx]*Gaus_val; 
-			tempG += d_imageArray[idx+1]*Gaus_val; 
-			tempB += d_imageArray[idx+2]*Gaus_val; 
-		}
-	}
-	
-	//store the blurrred image.
-	idx = ((y * w) + x)*3;
-	d_imageArrayResult[idx] = tempR;
-	d_imageArrayResult[idx+1] = tempG;
-	d_imageArrayResult[idx+2] = tempB;
-	
-}
-
-
 //
 // your __global__ kernel can go here, if you want:
 //
@@ -113,7 +65,7 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 	
 	int x = blockDim.x*blockIdx.x + threadIdx.x; 
 	int y = blockDim.y*blockIdx.y + threadIdx.y;
-	
+
 	unsigned int idxN, idxS, idxW, idxE;
 	float tempR = 0.0;
     float tempG = 0.0;
@@ -148,7 +100,7 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 		for( i = y-r, iSh = threadIdx.y ; i< (blockDim.y*(blockIdx.y + 1) + r)  ; i+=blockDim.y , iSh+=blockDim.y ){
 			for( j = x-r, jSh = threadIdx.x ; j < (blockDim.x*(blockIdx.x + 1) + r)  ; j+=blockDim.x , jSh+=blockDim.x){
 				
-				idxN = i<0? 0 : (i>=h ? h-1 : i );
+				idxN = (i<0) ? 0 : (i>=h ? h-1 : i );
 				idxS = j<0? 0 : (j>=w ? w-1 : j );
 	
 				picBlock[(iSh*shDim_x+jSh)] = d_imageArray[(idxN*w+idxS)*3];
@@ -341,6 +293,11 @@ int main (int argc, char *argv[])
     							sizeof(float)*d*d,
     							cudaMemcpyHostToDevice));
     							
+    GPU_CHECKERROR( cudaMemset(	d_imageArrayResult, 
+								111, 
+								sizeof(float)*w*h*3 
+								 ) );	
+															
 	GPU_CHECKERROR( cudaMemcpy(	d_imageArray, 
 								h_imageArray, 
 								sizeof(float)*w*h*3, 

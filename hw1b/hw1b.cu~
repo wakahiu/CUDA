@@ -113,7 +113,7 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 	
 	int x = blockDim.x*blockIdx.x + threadIdx.x; 
 	int y = blockDim.y*blockIdx.y + threadIdx.y;
-	
+
 	unsigned int idxN, idxS, idxW, idxE;
 	float tempR = 0.0;
     float tempG = 0.0;
@@ -148,26 +148,17 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 		for( i = y-r, iSh = threadIdx.y ; i< (blockDim.y*(blockIdx.y + 1) + r)  ; i+=blockDim.y , iSh+=blockDim.y ){
 			for( j = x-r, jSh = threadIdx.x ; j < (blockDim.x*(blockIdx.x + 1) + r)  ; j+=blockDim.x , jSh+=blockDim.x){
 				
-				idxN = i<0? 0 : (i>=h ? h-1 : i );
+				idxN = (i<0) ? 0 : (i>=h ? h-1 : i );
 				idxS = j<0? 0 : (j>=w ? w-1 : j );
 	
 				picBlock[(iSh*shDim_x+jSh)] = d_imageArray[(idxN*w+idxS)*3];
 				picBlock[(iSh*shDim_x+jSh)+offset] = d_imageArray[(idxN*w+idxS)*3+1];
 				picBlock[(iSh*shDim_x+jSh)+offset*2] = d_imageArray[(idxN*w+idxS)*3+2];
 				
-				picBlock[(iSh*shDim_x+jSh)] = 0.0;
-				picBlock[(iSh*shDim_x+jSh)+offset] = 0.0;
-				picBlock[(iSh*shDim_x+jSh)+offset*2] = 100.0;
-				
 			}
 		}
 
 		__syncthreads();		//Make sure every thread has loaded all its portions.
-		idxN = ((y * w) + x)*3;
-		d_imageArrayResult[idxN] = tempR+100;
-		d_imageArrayResult[idxN+1] = tempG;
-		d_imageArrayResult[idxN+2] = tempB;
-		return;
 	}
 	
 	/*
@@ -350,6 +341,11 @@ int main (int argc, char *argv[])
     							sizeof(float)*d*d,
     							cudaMemcpyHostToDevice));
     							
+    GPU_CHECKERROR( cudaMemset(	d_imageArrayResult, 
+								111, 
+								sizeof(float)*w*h*3 
+								 ) );	
+															
 	GPU_CHECKERROR( cudaMemcpy(	d_imageArray, 
 								h_imageArray, 
 								sizeof(float)*w*h*3, 
