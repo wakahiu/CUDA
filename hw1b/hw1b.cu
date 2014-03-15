@@ -66,11 +66,14 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 	int x = blockDim.x*blockIdx.x + threadIdx.x; 
 	int y = blockDim.y*blockIdx.y + threadIdx.y;
 
+	if(x >= w || y >= h)
+		return;
+		
+	int idx;
 	unsigned int idxN, idxS, idxW, idxE;
 	float tempR = 0.0;
     float tempG = 0.0;
     float tempB = 0.0;
-    
 	float Gaus_val = 0.0;
 	int	shDim_x = (blockDim.x + 2*r);
 	int	shDim_y = (blockDim.y + 2*r);
@@ -91,31 +94,34 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 				picBlock[(iSh*shDim_x+jSh)+offset*2] = d_imageArray[(i*w+j)*3+2];
 			}
 		}
-		__syncthreads();		//Make sure every thread has loaded all its portions.
 	}
-	
 	//These blocks may access picture elements that are out of bounds
 	else{
+		int xLim = blockDim.x*(blockIdx.x + 1) > w ? w : (blockDim.x*(blockIdx.x + 1) + r) ;
+		int yLim = blockDim.y*(blockIdx.y + 1) > h ? h : (blockDim.y*(blockIdx.y + 1) + r);
+		int xStep = blockDim.x*(blockIdx.x + 1) > w ? w%blockDim.x : blockDim.x ;
+		int yStep = blockDim.y*(blockIdx.y + 1) > h ? h%blockDim.y : blockDim.y ;
+		
 		//Collaborative loading into shared memory
-		for( i = y-r, iSh = threadIdx.y ; i< (blockDim.y*(blockIdx.y + 1) + r)  ; i+=blockDim.y , iSh+=blockDim.y ){
-			for( j = x-r, jSh = threadIdx.x ; j < (blockDim.x*(blockIdx.x + 1) + r)  ; j+=blockDim.x , jSh+=blockDim.x){
+		for( i = y-r, iSh = threadIdx.y ; i< yLim ; iSh+=yStep , i +=yStep ){
+			for( j = x-r, jSh = threadIdx.x ; j < xLim ; jSh+=xStep , j +=xStep){
 				
-				idxN = (i<0) ? 0 : (i>=h ? h-1 : i );
+				idxN = i<0? 0 : (i>=h ? h-1 : i );
 				idxS = j<0? 0 : (j>=w ? w-1 : j );
 	
 				picBlock[(iSh*shDim_x+jSh)] = d_imageArray[(idxN*w+idxS)*3];
 				picBlock[(iSh*shDim_x+jSh)+offset] = d_imageArray[(idxN*w+idxS)*3+1];
-				picBlock[(iSh*shDim_x+jSh)+offset*2] = d_imageArray[(idxN*w+idxS)*3+2];
-				
+				picBlock[(iSh*shDim_x+jSh)+offset*2] = d_imageArray[(idxN*w+idxS)*3+2];			
 			}
 		}
-
-		__syncthreads();		//Make sure every thread has loaded all its portions.
+		
 	}
+	__syncthreads();		//Make sure every thread has loaded all its portions.
 	
 	/*
 	* All the subblocks are now in shared memory. Now we blurr the image.
 	*/
+
 	
 	for( i = 0; i <= r; i++){
 		//Kernel is symetrix along x and y axis.
@@ -126,14 +132,14 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 		//Loop Unrolling 2 times.
 		for( j = 0; j <= r-1 ; j+=2){
 				
-			Gaus_val = d_dev_Gaussian[ iSh ];
+			Gaus_val = d_const_Gaussian[ iSh ];
 			tempR += (picBlock[idxN]+picBlock[idxS] + picBlock[idxE]+picBlock[idxW])*Gaus_val;
 			tempG += (picBlock[idxN+offset]+picBlock[idxS+offset]+picBlock[idxE+offset]+picBlock[idxW+offset])*Gaus_val;
 			tempB += (picBlock[idxN+offset*2]+picBlock[idxS+offset*2]+picBlock[idxE+offset*2]+picBlock[idxW+offset*2])*Gaus_val;
 			
 			idxS++;	idxN--;	idxE++;	idxW--; iSh++;
 			
-			Gaus_val = d_dev_Gaussian[ iSh ];
+			Gaus_val = d_const_Gaussian[ iSh ];
 			tempR += (picBlock[idxN]+picBlock[idxS] + picBlock[idxE]+picBlock[idxW])*Gaus_val;
 			tempG += (picBlock[idxN+offset]+picBlock[idxS+offset]+picBlock[idxE+offset]+picBlock[idxW+offset])*Gaus_val;
 			tempB += (picBlock[idxN+offset*2]+picBlock[idxS+offset*2]+picBlock[idxE+offset*2]+picBlock[idxW+offset*2])*Gaus_val;
@@ -143,8 +149,7 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 		}
 		//Complete the unrolled portion
 		for(  ; j <= r ; j++){
-				
-			Gaus_val = d_dev_Gaussian[ iSh ];
+			Gaus_val = d_const_Gaussian[ iSh ];
 			tempR += (picBlock[idxN]+picBlock[idxS] + picBlock[idxE]+picBlock[idxW])*Gaus_val;
 			tempG += (picBlock[idxN+offset]+picBlock[idxS+offset]+picBlock[idxE+offset]+picBlock[idxW+offset])*Gaus_val;
 			tempB += (picBlock[idxN+offset*2]+picBlock[idxS+offset*2]+picBlock[idxE+offset*2]+picBlock[idxW+offset*2])*Gaus_val;
@@ -155,10 +160,10 @@ __global__ void blurr_GPU(float * d_imageArray,float * d_imageArrayResult, float
 	}
 	
 	//store the blurrred image.
-	idxN = ((y * w) + x)*3;
-	d_imageArrayResult[idxN] = tempR;
-	d_imageArrayResult[idxN+1] = tempG;
-	d_imageArrayResult[idxN+2] = tempB;
+	idx = ((y * w) + x)*3;
+	d_imageArrayResult[idx++] = tempR;
+	d_imageArrayResult[idx++] = tempG;
+	d_imageArrayResult[idx++] = tempB;
 	
 }
 
@@ -196,7 +201,6 @@ void blurr_CPU( float *h_imageArray, float *h_imageArrayResult, int w, int h, in
 
 int main (int argc, char *argv[])
 {
- 
     struct timeval t0, t1;
     int w, h;   // the width & height of the image, used frequently
     int r = atoi( argv[2] );		//Pray that the input radius is a single digit
@@ -204,7 +208,7 @@ int main (int argc, char *argv[])
 
 	cudaDeviceProp dev_prop_curr;
 	cudaGetDeviceProperties( &dev_prop_curr , 0);
-	printDevProp( dev_prop_curr );
+	//printDevProp( dev_prop_curr );
         
    	/*
  	*Start by calculating the Gaussian Kernel
@@ -235,15 +239,15 @@ int main (int argc, char *argv[])
 	for(int i = -r; i <= r; i++){
  		for(int j = -r; j <= r ; j++){
 			h_Gaussian[i+r][j+r] /= normalization;
-			/*if(i==0){
+			if(i==0){
 				h_Gaussian[i+r][j+r]/=2.0;
 			}
 			if(j==0){
 				h_Gaussian[i+r][j+r]/=2.0;
-			}*/
-			printf("%e\t",h_Gaussian[i+r][j+r]);
+			}
+			//printf("%e\t",h_Gaussian[i+r][j+r]);
  		}
-		printf("\n");
+		//printf("\n");
  	}
  	
 
@@ -253,7 +257,7 @@ int main (int argc, char *argv[])
     //
     float *h_imageArray;
     readOpenEXRFile (argv[1], &h_imageArray, w, h);
-    float h_imageArrayResult[w*h*3];
+    float * h_imageArrayResult = (float*)malloc(sizeof(float)*3*w*h);
     
     gettimeofday(&t0,0);
     
@@ -265,6 +269,12 @@ int main (int argc, char *argv[])
     float * d_test;
     float BLOCK_X = 16.0;
 	float BLOCK_Y = 16.0;
+	
+	//For Nvidia cluster.
+	if( dev_prop_curr.maxThreadsPerBlock >= 1024 ){ 
+		BLOCK_X = 32.0;	
+		BLOCK_Y = 32.0;
+	}
 	size_t sharedBlockSZ = 3*(BLOCK_X+2*r) * (BLOCK_Y+2*r) * sizeof(float);	//Picture blocks
 	if(sharedBlockSZ > dev_prop_curr.sharedMemPerBlock){
 		printf("Shared Memory exceeded allocated size per block: %lu Max %lu\n",sharedBlockSZ, dev_prop_curr.sharedMemPerBlock);
@@ -286,17 +296,6 @@ int main (int argc, char *argv[])
     							sizeof(float)*d*d,
     							0,
     							cudaMemcpyHostToDevice));
-	
-
-	GPU_CHECKERROR( cudaMemcpy( d_test, 
-    							&h_Gaussian[0][0], 
-    							sizeof(float)*d*d,
-    							cudaMemcpyHostToDevice));
-    							
-    GPU_CHECKERROR( cudaMemset(	d_imageArrayResult, 
-								111, 
-								sizeof(float)*w*h*3 
-								 ) );	
 															
 	GPU_CHECKERROR( cudaMemcpy(	d_imageArray, 
 								h_imageArray, 
@@ -327,6 +326,7 @@ int main (int argc, char *argv[])
     
     
     free (h_imageArray);
+	free (h_imageArrayResult);
 	GPU_CHECKERROR( cudaFree(d_imageArray) );
     GPU_CHECKERROR( cudaFree(d_imageArrayResult));
 	GPU_CHECKERROR( cudaFree(d_test) );
